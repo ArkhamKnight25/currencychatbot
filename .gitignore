@@ -1,0 +1,54 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+.env
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environment files
+.env.local
+.env.*.local
+.env.*
+!.env.example
+
+# TypeScript
+*.tsbuildinfo
+
+# Vite / build caches
+.vite
+.parcel-cache
+
+# Cache and tooling
+.cache
+.eslintcache
+
+# Test coverage
+coverage
+.nyc_output
+
+# Misc
+Thumbs.db
+ehthumbs.db
+.rpt2_cache
+.rts2_cache_cjs
+.rts2_cache_es
+

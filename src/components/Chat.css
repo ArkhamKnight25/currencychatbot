@@ -1,0 +1,33 @@
+.chat-container {
+  flex: 1;
+  background-color: white;
+  border-radius: 0;
+  box-shadow: none;
+  height: 100%;
+  width: 100%;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  overflow: hidden;
+}
+
+.chat-container h2 {
+  margin: 0 0 20px 0;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #f0f0f0;
+  color: #333;
+  font-size: 24px;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+  .chat-container {
+    padding: 15px;
+  }
+
+  .chat-container h2 {
+    font-size: 20px;
+    margin-bottom: 15px;
+  }
+}

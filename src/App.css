@@ -1,0 +1,67 @@
+/* Reset margin and padding for body and html */
+body,
+html {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow-x: hidden;
+}
+
+.App {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background-color: #fef4df;
+  font-family: Arial, sans-serif;
+}
+
+.main-content {
+  display: flex;
+  flex: 1;
+  width: 100%;
+  min-height: 0; /* Important for flex children to shrink */
+}
+
+.message {
+  margin: 10px 0;
+  padding: 8px;
+  border-radius: 4px;
+  max-width: 80%;
+}
+
+.message.user {
+  background-color: #d1ffd6;
+  align-self: flex-end;
+}
+
+.message.bot {
+  background-color: #f1f1f1;
+  align-self: flex-start;
+}
+
+.input-container {
+  display: flex;
+  gap: 10px;
+}
+
+input[type="text"] {
+  flex: 1;
+  padding: 10px;
+  font-size: 16px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+button {
+  padding: 10px;
+  font-size: 16px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  cursor: pointer;
+  background-color: #4caf50; /* Change this color to modify the button color */
+  color: white;
+}
+
+button:hover {
+  background-color: #45a049;
+}
