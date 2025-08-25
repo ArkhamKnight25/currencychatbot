@@ -262,30 +262,14 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
     
     // Normalize currency names and validate known currencies
     const normalizeCurrency = (currency: string): string => {
-      // Extract all unique currencies from trading patterns
-      const validCurrencies = new Set<string>();
-      tradingPatterns.forEach(pattern => {
-        if (pattern.sell_currency !== "not specified") {
-          validCurrencies.add(pattern.sell_currency.toUpperCase());
-        }
-        if (pattern.buy_currency !== "not specified") {
-          validCurrencies.add(pattern.buy_currency.toUpperCase());
-        }
-      });
+      // Skip common trading/command words that aren't currencies
+      const nonCurrencyWords = ['stop', 'order', 'loss', 'buy', 'sell', 'for', 'and', 'the', 'with', 'from', 'into', 'swap', 'protect'];
+      if (nonCurrencyWords.includes(currency.toLowerCase())) {
+        console.log("Rejecting non-currency word:", currency);
+        return '';
+      }
       
-      // Convert Set to Array for easier manipulation
-      const validCurrencyList = Array.from(validCurrencies);
-      
-      // Create currency mapping from your trading patterns
-      const currencyMap: { [key: string]: string } = {};
-      
-      // Add lowercase variants for each valid currency
-      validCurrencyList.forEach(curr => {
-        currencyMap[curr.toLowerCase()] = curr;
-        currencyMap[curr.toUpperCase()] = curr;
-      });
-      
-      // Add common name variations for your specific currencies
+      // Create currency mapping from common variations
       const commonVariations: { [key: string]: string } = {
         'usdc': 'USDC',
         'usd coin': 'USDC',
@@ -363,23 +347,20 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       
       // Check common variations first
       const normalized = commonVariations[currency.toLowerCase()];
-      if (normalized && validCurrencyList.includes(normalized)) {
+      if (normalized) {
+        console.log("Currency normalized:", currency, "->", normalized);
         return normalized;
       }
       
-      // Check direct mapping
-      const directMatch = currencyMap[currency.toLowerCase()];
-      if (directMatch) {
-        return directMatch;
-      }
-      
-      // Only return uppercase if it's in our valid currency list
+      // If not found in mapping, return uppercase if it looks like a valid currency (3-5 chars)
       const upperCurrency = currency.toUpperCase();
-      if (validCurrencyList.includes(upperCurrency)) {
+      if (upperCurrency.length >= 3 && upperCurrency.length <= 5 && /^[A-Z]+$/.test(upperCurrency)) {
+        console.log("Currency accepted as-is:", upperCurrency);
         return upperCurrency;
       }
       
-      return ''; // Return empty for currencies not in our trading patterns
+      console.log("Currency not recognized:", currency);
+      return ''; // Return empty for unrecognized currencies
     };
     
     // Context-aware parameter extraction based on last question
@@ -398,15 +379,22 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       // If it's just a currency name in response to a question
       const currencyOnly = input.match(/^([A-Za-z]{3,})$/);
       if (currencyOnly) {
+        console.log("Currency-only input detected:", currencyOnly[1]);
         const currency = normalizeCurrency(currencyOnly[1]);
+        console.log("Normalized currency result:", currency);
+        console.log("Last question:", lastQuestion);
         if (currency) {
           if (lastQuestion.toLowerCase().includes('selling') || lastQuestion.toLowerCase().includes('sell')) {
+            console.log("Setting sell_coin to:", currency);
             extracted.sell_coin = currency;
             return extracted;
           } else if (lastQuestion.toLowerCase().includes('buying') || lastQuestion.toLowerCase().includes('buy')) {
+            console.log("Setting buy_coin to:", currency);
             extracted.buy_coin = currency;
             return extracted;
           }
+        } else {
+          console.log("Currency normalization failed for:", currencyOnly[1]);
         }
       }
     }
@@ -428,6 +416,10 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
     
     // Extract sell_coin and amount - improved patterns
     const sellPatterns = [
+      // Pattern for "swap 1000 ADA for USDC" - captures amount, sell currency, and buy currency
+      /swap\s+(\d+(?:\.\d+)?)(?!\s*%)\s*([A-Za-z]{3,})\s+for\s+([A-Za-z]{3,})/i,
+      // Pattern for "protect my btc for usdc i want to sell 15" - captures sell and buy currencies, then amount
+      /protect\s+my\s+([A-Za-z]{3,})\s+for\s+([A-Za-z]{3,})\s+.*?sell\s+(\d+(?:\.\d+)?)(?!\s*%)/i,
       // Pattern for "stop order for xavi buy me Pepe instead"
       /stop\s+order\s+for\s+([A-Za-z]{3,})\s+buy\s+me\s+([A-Za-z]{3,})\s+instead/i,
       // Pattern for "protects my Xai for Aave" - specific for current input
@@ -441,7 +433,7 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       // Pattern for "protect my 50 usdc" - captures both amount and currency (avoid percentages)
       /protect\s+my\s+(\d+(?:\.\d+)?)(?!\s*%)\s*([A-Za-z]{3,})/i,
       // Pattern for "50 ETH" when context suggests selling (avoid percentages)
-      /(\d+(?:\.\d+)?)(?!\s*%)\s*([A-Za-z]{3,})(?:\s+to\s+buy|\s+for|\s+into)/i,
+      /(\d+(?:\.\d+)?)(?!\s*%)\s*([A-Za-z]{3,})(?!\s*for)(?:\s+to\s+buy|\s+into)/i,
       // Pattern for "selling ETH", "from ETH" etc.
       /(?:selling|from|exchange|convert)\s+([A-Za-z]{3,})/i,
       /sell\s+([A-Za-z]{3,})/i,
@@ -457,11 +449,55 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       /for\s+([A-Za-z]{3,})/i
     ];
     
+    let swapPatternMatched = false;
+    
     for (const pattern of sellPatterns) {
       const match = input.match(pattern);
       if (match) {
         console.log("Sell pattern matched:", pattern.source, "with groups:", match);
-        if (pattern.source.includes('stop\\s+order\\s+for\\s+([A-Za-z]{3,})\\s+buy\\s+me\\s+([A-Za-z]{3,})\\s+instead')) {
+        if (pattern.source.includes('swap') && pattern.source.includes('for')) {
+          // Special case for "swap 1000 ADA for USDC"
+          console.log("Processing swap pattern - full match:", match);
+          const amount = match[1];
+          const sellCurrency = normalizeCurrency(match[2]);
+          const buyCurrency = normalizeCurrency(match[3]);
+          console.log("Extracted from swap:", { amount, sellCurrency, buyCurrency });
+          if (sellCurrency) {
+            extracted.sell_coin = sellCurrency;
+            console.log("Set sell_coin to:", sellCurrency);
+          }
+          if (buyCurrency) {
+            extracted.buy_coin = buyCurrency;
+            console.log("Set buy_coin to:", buyCurrency);
+          }
+          if (amount) {
+            extracted.no_of_sell_coins = amount;
+            console.log("Set amount to:", amount);
+          }
+          swapPatternMatched = true;
+          console.log("Swap pattern processed, swapPatternMatched set to true");
+        } else if (pattern.source.includes('protect') && pattern.source.includes('for') && pattern.source.includes('sell') && match.length >= 4) {
+          // Special case for "protect my btc for usdc i want to sell 15"
+          console.log("Processing protect+sell pattern - full match:", match);
+          const sellCurrency = normalizeCurrency(match[1]);
+          const buyCurrency = normalizeCurrency(match[2]);
+          const amount = match[3];
+          console.log("Extracted from protect+sell:", { sellCurrency, buyCurrency, amount });
+          if (sellCurrency) {
+            extracted.sell_coin = sellCurrency;
+            console.log("Set sell_coin to:", sellCurrency);
+          }
+          if (buyCurrency) {
+            extracted.buy_coin = buyCurrency;
+            console.log("Set buy_coin to:", buyCurrency);
+          }
+          if (amount) {
+            extracted.no_of_sell_coins = amount;
+            console.log("Set amount to:", amount);
+          }
+          swapPatternMatched = true;
+          console.log("Protect+sell pattern processed, swapPatternMatched set to true");
+        } else if (pattern.source.includes('stop') && pattern.source.includes('order') && pattern.source.includes('buy') && pattern.source.includes('me') && pattern.source.includes('instead')) {
           // Special case for "stop order for xavi buy me Pepe instead"
           const sellCurrency = normalizeCurrency(match[1]);
           const buyCurrency = normalizeCurrency(match[2]);
@@ -541,8 +577,10 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       }
     }
     
-    // Extract buy_coin - multiple patterns
-    const buyPatterns = [
+    // Extract buy_coin - multiple patterns (skip if swap pattern already handled both currencies)
+    if (!swapPatternMatched) {
+      console.log("Processing buy patterns since swapPatternMatched is false");
+      const buyPatterns = [
       // Pattern for "buy me Pepe instead"
       /buy\s+me\s+([A-Za-z]{3,})\s+instead/i,
       // Pattern for "protect my usdc for usdt" - specific for your case
@@ -577,6 +615,10 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
         }
         break;
       }
+    }
+    
+    } else {
+      console.log("Skipping buy pattern extraction since swapPatternMatched is true");
     }
     
     // If input is just a currency name and no sell/buy context, check what we're missing
@@ -615,10 +657,17 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
     }
     
     // Fallback: try to extract any currency-like words if main patterns didn't work
-    if (!extracted.sell_coin || !extracted.buy_coin) {
+    if ((!extracted.sell_coin || !extracted.buy_coin) && !swapPatternMatched) {
       const allCurrencyMatches = input.match(/\b[A-Z]{3,5}\b/gi);
       if (allCurrencyMatches) {
         for (const match of allCurrencyMatches) {
+          // Skip common non-currency words that might be capitalized
+          const skipWords = ['STOP', 'ORDER', 'LOSS', 'BUY', 'SELL', 'FOR', 'AND', 'THE', 'WITH', 'FROM', 'INTO'];
+          if (skipWords.includes(match.toUpperCase())) {
+            console.log("Skipping non-currency word:", match);
+            continue;
+          }
+          
           const normalized = normalizeCurrency(match);
           if (normalized) {
             if (!extracted.sell_coin) {
@@ -711,17 +760,30 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       // Format the conversation history for Gemini
       let systemPrompt = `You are UniSwap Currency AI - a friendly and knowledgeable universal currency exchange assistant.
 
+IMPORTANT RULES:
+1. When users mention "stop order" or similar, DO NOT ask detailed trading questions
+2. Simply guide them through our simple parameter collection process
+3. Ask only for: sell currency, buy currency, amount, and threshold percentage
+4. Keep responses short and focused
+5. Don't ask about exchanges, entry prices, or complex trading details
+
 You can help with:
 - Real-time currency exchange rates and market analysis
 - International money transfer guidance and cost optimization
 - Cryptocurrency and traditional currency conversions
 - Economic trends and their impact on exchange rates
 - General financial questions and currency information
-- Casual conversation about finance and markets
+- Simple stop order setup (sell currency → buy currency at threshold)
 
-IMPORTANT: You are a helpful assistant that can discuss ANY topic, not just trading parameters. Be conversational and friendly.
+ONLY if the user specifically mentions "stop order" or "stop orders", then you should help them set up trading parameters using our simple 4-parameter system.
 
-ONLY if the user specifically mentions "stop order" or "stop orders", then you should help them set up trading parameters. Otherwise, just have normal helpful conversations.`;
+For stop orders, ONLY ask for these 4 things:
+1. What currency are you selling?
+2. What currency do you want to buy?
+3. How many coins are you selling?
+4. What's your threshold percentage?
+
+Do NOT ask about exchanges, entry prices, market prices, or other complex details.`;
 
       // Only include trading parameters if we're in trading mode OR if parameters are complete
       if (needsTradingParams || getMissingParams(tradingParams).length === 0) {
