@@ -36,6 +36,90 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
   const [hasWelcomed, setHasWelcomed] = useState(false);
   const [lastQuestion, setLastQuestion] = useState<string>("");
 
+  // Training patterns for improved NLP recognition (first 10 patterns)
+  const tradingPatterns = [
+    {
+      id: 1,
+      original_request: "Hi can you create a stop order to protect my tokenA for TokenB i want to sell 15 token A when stop-loss hits 15%",
+      sell_currency: "TokenA",
+      buy_currency: "TokenB",
+      threshold: "15%",
+      amount_to_sell: "15"
+    },
+    {
+      id: 2,
+      original_request: "protect my usdc and sell them for receiving usdt at 50% loss",
+      sell_currency: "USDC",
+      buy_currency: "USDT",
+      threshold: "50%",
+      amount_to_sell: "not specified"
+    },
+    {
+      id: 3,
+      original_request: "stop order create 200 usdc sell receive DAI 50 loss % 45",
+      sell_currency: "USDC",
+      buy_currency: "DAI",
+      threshold: "45%",
+      amount_to_sell: "200"
+    },
+    {
+      id: 4,
+      original_request: "lets create a stop order which protects my Xai for Aave when loss % drops to 12%",
+      sell_currency: "XAI",
+      buy_currency: "AAVE",
+      threshold: "12%",
+      amount_to_sell: "not specified"
+    },
+    {
+      id: 5,
+      original_request: "sell my eurs to at 40% loss",
+      sell_currency: "EURS",
+      buy_currency: "not specified",
+      threshold: "40%",
+      amount_to_sell: "not specified"
+    },
+    {
+      id: 6,
+      original_request: "stop order for xavi buy me Pepe instead",
+      sell_currency: "XAVI",
+      buy_currency: "PEPE",
+      threshold: "not specified",
+      amount_to_sell: "not specified"
+    },
+    {
+      id: 7,
+      original_request: "lets create a stop order sell my usdt to get usdc when loss is 20%",
+      sell_currency: "USDT",
+      buy_currency: "USDC",
+      threshold: "20%",
+      amount_to_sell: "not specified"
+    },
+    {
+      id: 8,
+      original_request: "can you protect my tokens i want wbtc to be sold for a loss of 20% and buy weth",
+      sell_currency: "WBTC",
+      buy_currency: "WETH",
+      threshold: "20%",
+      amount_to_sell: "not specified"
+    },
+    {
+      id: 9,
+      original_request: "set up a stop loss for my ETH, sell 100 tokens for USDC when it drops 25%",
+      sell_currency: "ETH",
+      buy_currency: "USDC",
+      threshold: "25%",
+      amount_to_sell: "100"
+    },
+    {
+      id: 10,
+      original_request: "I need protection on my MATIC holdings, convert to DAI if loss reaches 30%",
+      sell_currency: "MATIC",
+      buy_currency: "DAI",
+      threshold: "30%",
+      amount_to_sell: "not specified"
+    }
+  ];
+
   useEffect(() => {
     console.log("chatId", chatId);
     const savedMessages = JSON.parse(
@@ -106,55 +190,196 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
   const extractTradingParams = (input: string, lastQuestion?: string): Partial<TradingParams> => {
     const extracted: Partial<TradingParams> = {};
     
+    // FIRST: Extract threshold from percentage mentions (highest priority)
+    const thresholdPatterns = [
+      /(?:about\s+)?(?:a\s+)?(\d+(?:\.\d+)?)%?\s*threshold/i,
+      /threshold.*?(?:about\s+)?(?:a\s+)?(\d+(?:\.\d+)?)%?/i,
+      /at\s+(?:about\s+)?(\d+(?:\.\d+)?)%\s*loss/i,
+      /(\d+(?:\.\d+)?)%\s*loss/i,
+      /loss\s+(?:of\s+)?(\d+(?:\.\d+)?)%/i,
+      /for\s+(?:about\s+)?(?:a\s+)?(\d+(?:\.\d+)?)%/i,
+      /at\s+(?:about\s+)?(\d+(?:\.\d+)?)%/i,
+      /(?:about\s+)?(?:a\s+)?(\d+(?:\.\d+)?)%/i,
+      // Pattern for "stop loss of 12%"
+      /stop\s+loss\s+(?:of|at)\s+(\d+(?:\.\d+)?)%?/i,
+      /at\s+a\s+stop\s+loss\s+of\s+(\d+(?:\.\d+)?)%?/i
+    ];
+    
+    for (const pattern of thresholdPatterns) {
+      const match = input.match(pattern);
+      if (match) {
+        extracted.threshold = match[1];
+        console.log("Threshold extracted:", match[1], "from pattern:", pattern.source);
+        break;
+      }
+    }
+    
+    // SECOND: Try to match against known patterns for improved accuracy (only if we haven't extracted currencies yet)
+    const inputLower = input.toLowerCase();
+    if (!extracted.sell_coin && !extracted.buy_coin) {
+      for (const pattern of tradingPatterns) {
+        const patternLower = pattern.original_request.toLowerCase();
+        // Calculate similarity score (simple word matching)
+        const inputWords = inputLower.split(/\s+/);
+        const patternWords = patternLower.split(/\s+/);
+        const commonWords = inputWords.filter(word => patternWords.includes(word));
+        const similarity = commonWords.length / Math.max(inputWords.length, patternWords.length);
+        
+        // Increase threshold and add currency validation to prevent false matches
+        if (similarity > 0.5) {
+          console.log(`Pattern match found (${Math.round(similarity * 100)}%):`, pattern.original_request);
+          
+          // Additional validation: check if the pattern currencies actually appear in the input
+          const inputHasSellCurrency = pattern.sell_currency === "not specified" || 
+                                     inputLower.includes(pattern.sell_currency.toLowerCase());
+          const inputHasBuyCurrency = pattern.buy_currency === "not specified" || 
+                                    inputLower.includes(pattern.buy_currency.toLowerCase());
+          
+          // Only use pattern if currencies match or are generic
+          if (inputHasSellCurrency && inputHasBuyCurrency) {
+            if (pattern.sell_currency !== "not specified" && !extracted.sell_coin) {
+              extracted.sell_coin = pattern.sell_currency;
+            }
+            if (pattern.buy_currency !== "not specified" && !extracted.buy_coin) {
+              extracted.buy_coin = pattern.buy_currency;
+            }
+            if (pattern.threshold !== "not specified" && !extracted.threshold) {
+              extracted.threshold = pattern.threshold.replace('%', '');
+            }
+            if (pattern.amount_to_sell !== "not specified" && !extracted.no_of_sell_coins) {
+              extracted.no_of_sell_coins = pattern.amount_to_sell;
+            }
+            break; // Use first matching pattern
+          } else {
+            console.log("Pattern skipped - currencies don't match input:", 
+                       "sell:", pattern.sell_currency, "buy:", pattern.buy_currency);
+          }
+        }
+      }
+    } else {
+      console.log("Skipping pattern matching - currencies already extracted from direct patterns");
+    }
+    
     // Normalize currency names and validate known currencies
     const normalizeCurrency = (currency: string): string => {
-      const currencyMap: { [key: string]: string } = {
-        'bitcoin': 'BTC',
-        'btc': 'BTC',
+      // Extract all unique currencies from trading patterns
+      const validCurrencies = new Set<string>();
+      tradingPatterns.forEach(pattern => {
+        if (pattern.sell_currency !== "not specified") {
+          validCurrencies.add(pattern.sell_currency.toUpperCase());
+        }
+        if (pattern.buy_currency !== "not specified") {
+          validCurrencies.add(pattern.buy_currency.toUpperCase());
+        }
+      });
+      
+      // Convert Set to Array for easier manipulation
+      const validCurrencyList = Array.from(validCurrencies);
+      
+      // Create currency mapping from your trading patterns
+      const currencyMap: { [key: string]: string } = {};
+      
+      // Add lowercase variants for each valid currency
+      validCurrencyList.forEach(curr => {
+        currencyMap[curr.toLowerCase()] = curr;
+        currencyMap[curr.toUpperCase()] = curr;
+      });
+      
+      // Add common name variations for your specific currencies
+      const commonVariations: { [key: string]: string } = {
+        'usdc': 'USDC',
+        'usd coin': 'USDC',
+        'usdt': 'USDT', 
+        'tether': 'USDT',
+        'dai': 'DAI',
         'ethereum': 'ETH',
         'eth': 'ETH',
-        'litecoin': 'LTC',
-        'ltc': 'LTC',
-        'ripple': 'XRP',
-        'xrp': 'XRP',
-        'cardano': 'ADA',
-        'ada': 'ADA',
-        'polkadot': 'DOT',
-        'dot': 'DOT',
+        'bitcoin': 'BTC',
+        'btc': 'BTC',
+        'matic': 'MATIC',
+        'polygon': 'MATIC',
         'chainlink': 'LINK',
         'link': 'LINK',
         'solana': 'SOL',
         'sol': 'SOL',
+        'binance': 'BNB',
+        'bnb': 'BNB',
+        'cardano': 'ADA',
+        'ada': 'ADA',
+        'avalanche': 'AVAX',
+        'avax': 'AVAX',
+        'polkadot': 'DOT',
+        'dot': 'DOT',
+        'uniswap': 'UNI',
+        'uni': 'UNI',
+        'algorand': 'ALGO',
+        'algo': 'ALGO',
+        'cosmos': 'ATOM',
+        'atom': 'ATOM',
+        'fantom': 'FTM',
+        'ftm': 'FTM',
+        'near': 'NEAR',
+        'sandbox': 'SAND',
+        'sand': 'SAND',
+        'decentraland': 'MANA',
+        'mana': 'MANA',
         'dogecoin': 'DOGE',
         'doge': 'DOGE',
-        'usdc': 'USDC',
-        'usd coin': 'USDC',
-        'usdt': 'USDT',
-        'tether': 'USDT',
-        'dollar': 'USD',
-        'dollars': 'USD',
-        'usd': 'USD',
-        'euro': 'EUR',
-        'euros': 'EUR',
-        'eur': 'EUR',
-        'pound': 'GBP',
-        'pounds': 'GBP',
-        'gbp': 'GBP',
-        'yen': 'JPY',
-        'jpy': 'JPY'
+        'litecoin': 'LTC',
+        'ltc': 'LTC',
+        'cronos': 'CRO',
+        'cro': 'CRO',
+        'shiba': 'SHIB',
+        'shib': 'SHIB',
+        'compound': 'COMP',
+        'comp': 'COMP',
+        'graph': 'GRT',
+        'grt': 'GRT',
+        'aave': 'AAVE',
+        'luna': 'LUNA',
+        'internet computer': 'ICP',
+        'icp': 'ICP',
+        'flow': 'FLOW',
+        'theta': 'THETA',
+        'enjin': 'ENJ',
+        'enj': 'ENJ',
+        'vechain': 'VET',
+        'vet': 'VET',
+        'hedera': 'HBAR',
+        'hbar': 'HBAR',
+        'wrapped bitcoin': 'WBTC',
+        'wbtc': 'WBTC',
+        'wrapped ethereum': 'WETH',
+        'weth': 'WETH',
+        'xai': 'XAI',
+        'euros': 'EURS',
+        'eurs': 'EURS',
+        'xavi': 'XAVI',
+        'pepe': 'PEPE',
+        'busd': 'BUSD',
+        'tokena': 'TokenA',
+        'tokenb': 'TokenB'
       };
       
-      const normalized = currencyMap[currency.toLowerCase()];
-      if (normalized) {
+      // Check common variations first
+      const normalized = commonVariations[currency.toLowerCase()];
+      if (normalized && validCurrencyList.includes(normalized)) {
         return normalized;
       }
       
-      // Only return uppercase if it's likely a known currency (3-4 chars)
-      if (currency.length >= 3 && currency.length <= 4 && /^[A-Za-z]+$/.test(currency)) {
-        return currency.toUpperCase();
+      // Check direct mapping
+      const directMatch = currencyMap[currency.toLowerCase()];
+      if (directMatch) {
+        return directMatch;
       }
       
-      return ''; // Return empty for invalid currencies
+      // Only return uppercase if it's in our valid currency list
+      const upperCurrency = currency.toUpperCase();
+      if (validCurrencyList.includes(upperCurrency)) {
+        return upperCurrency;
+      }
+      
+      return ''; // Return empty for currencies not in our trading patterns
     };
     
     // Context-aware parameter extraction based on last question
@@ -201,34 +426,22 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       }
     }
     
-    // Extract threshold from percentage mentions - improved patterns
-    const thresholdPatterns = [
-      /(?:about\s+)?(?:a\s+)?(\d+(?:\.\d+)?)%?\s*threshold/i,
-      /threshold.*?(?:about\s+)?(?:a\s+)?(\d+(?:\.\d+)?)%?/i,
-      /for\s+(?:about\s+)?(?:a\s+)?(\d+(?:\.\d+)?)%/i,
-      /at\s+(?:about\s+)?(\d+(?:\.\d+)?)%/i,
-      /(?:about\s+)?(?:a\s+)?(\d+(?:\.\d+)?)%/i,
-      // Pattern for "stop loss of 12%"
-      /stop\s+loss\s+(?:of|at)\s+(\d+(?:\.\d+)?)%?/i,
-      /at\s+a\s+stop\s+loss\s+of\s+(\d+(?:\.\d+)?)%?/i
-    ];
-    
-    for (const pattern of thresholdPatterns) {
-      const match = input.match(pattern);
-      if (match) {
-        extracted.threshold = match[1];
-        break;
-      }
-    }
-    
     // Extract sell_coin and amount - improved patterns
     const sellPatterns = [
-      // Pattern for "sell 50 ETH" - captures both amount and currency
-      /(?:sell|selling|want\s+to\s+sell|wanna\s+sell)\s+(\d+(?:\.\d+)?)\s*([A-Za-z]{3,})/i,
-      // Pattern for "protect my 50 usdc" - captures both amount and currency
-      /protect\s+my\s+(\d+(?:\.\d+)?)\s*([A-Za-z]{3,})/i,
-      // Pattern for "50 ETH" when context suggests selling
-      /(\d+(?:\.\d+)?)\s*([A-Za-z]{3,})(?:\s+to\s+buy|\s+for|\s+into)/i,
+      // Pattern for "stop order for xavi buy me Pepe instead"
+      /stop\s+order\s+for\s+([A-Za-z]{3,})\s+buy\s+me\s+([A-Za-z]{3,})\s+instead/i,
+      // Pattern for "protects my Xai for Aave" - specific for current input
+      /protects?\s+my\s+([A-Za-z]{3,})\s+for\s+([A-Za-z]{3,})/i,
+      // Pattern for "protect my usdc and sell them for receiving usdt" - specific pattern without amount
+      /protect\s+my\s+([A-Za-z]{3,})\s+and\s+sell\s+them\s+for\s+receiving\s+([A-Za-z]{3,})/i,
+      // Pattern for "sell 50 ETH" - captures both amount and currency (avoid percentages)
+      /(?:sell|selling|want\s+to\s+sell|wanna\s+sell)\s+(\d+(?:\.\d+)?)(?!\s*%)\s*([A-Za-z]{3,})/i,
+      // Pattern for "protect my usdc for usdt i want to sell 15 usdc" - specific for your case
+      /protect\s+my\s+([A-Za-z]{3,})\s+for\s+[A-Za-z]{3,}.*?sell\s+(\d+(?:\.\d+)?)(?!\s*%)\s*([A-Za-z]{3,})/i,
+      // Pattern for "protect my 50 usdc" - captures both amount and currency (avoid percentages)
+      /protect\s+my\s+(\d+(?:\.\d+)?)(?!\s*%)\s*([A-Za-z]{3,})/i,
+      // Pattern for "50 ETH" when context suggests selling (avoid percentages)
+      /(\d+(?:\.\d+)?)(?!\s*%)\s*([A-Za-z]{3,})(?:\s+to\s+buy|\s+for|\s+into)/i,
       // Pattern for "selling ETH", "from ETH" etc.
       /(?:selling|from|exchange|convert)\s+([A-Za-z]{3,})/i,
       /sell\s+([A-Za-z]{3,})/i,
@@ -239,13 +452,53 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       // Pattern for "protect my USDC" (currency only, no numbers) - must come after amount patterns
       /protect\s+my\s+([A-Za-z]{3,})(?!\s*\d)/i,
       /stop\s+loss\s+(?:for|on|of)\s+([A-Za-z]{3,})/i,
-      /stop\s+loss\s+my\s+([A-Za-z]{3,})/i
+      /stop\s+loss\s+my\s+([A-Za-z]{3,})/i,
+      // General "for currency" pattern - moved to end to avoid conflicts
+      /for\s+([A-Za-z]{3,})/i
     ];
     
     for (const pattern of sellPatterns) {
       const match = input.match(pattern);
       if (match) {
-        if (pattern.source.includes('(\\d+')) {
+        console.log("Sell pattern matched:", pattern.source, "with groups:", match);
+        if (pattern.source.includes('stop\\s+order\\s+for\\s+([A-Za-z]{3,})\\s+buy\\s+me\\s+([A-Za-z]{3,})\\s+instead')) {
+          // Special case for "stop order for xavi buy me Pepe instead"
+          const sellCurrency = normalizeCurrency(match[1]);
+          const buyCurrency = normalizeCurrency(match[2]);
+          if (sellCurrency) {
+            extracted.sell_coin = sellCurrency;
+          }
+          if (buyCurrency) {
+            extracted.buy_coin = buyCurrency;
+          }
+        } else if (pattern.source.includes('protects?\\s+my\\s+([A-Za-z]{3,})\\s+for\\s+([A-Za-z]{3,})')) {
+          // Special case for "protects my Xai for Aave"
+          const sellCurrency = normalizeCurrency(match[1]);
+          const buyCurrency = normalizeCurrency(match[2]);
+          if (sellCurrency) {
+            extracted.sell_coin = sellCurrency;
+          }
+          if (buyCurrency) {
+            extracted.buy_coin = buyCurrency;
+          }
+        } else if (pattern.source.includes('protect\\s+my\\s+([A-Za-z]{3,})\\s+and\\s+sell\\s+them\\s+for\\s+receiving\\s+([A-Za-z]{3,})')) {
+          // Special case for "protect my usdc and sell them for receiving usdt"
+          const sellCurrency = normalizeCurrency(match[1]);
+          const buyCurrency = normalizeCurrency(match[2]);
+          if (sellCurrency) {
+            extracted.sell_coin = sellCurrency;
+          }
+          if (buyCurrency) {
+            extracted.buy_coin = buyCurrency;
+          }
+        } else if (pattern.source.includes('protect\\s+my\\s+([A-Za-z]{3,})\\s+for\\s+[A-Za-z]{3,}.*?sell\\s+(\\d+')) {
+          // Special case for "protect my usdc for usdt i want to sell 15 usdc"
+          const normalizedCurrency = normalizeCurrency(match[3] || match[1]);
+          if (normalizedCurrency) {
+            extracted.sell_coin = normalizedCurrency;
+            extracted.no_of_sell_coins = match[2];
+          }
+        } else if (pattern.source.includes('(\\d+')) {
           // Pattern with amount and currency
           if (match[2]) {
             const normalizedCurrency = normalizeCurrency(match[2]);
@@ -290,6 +543,10 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
     
     // Extract buy_coin - multiple patterns
     const buyPatterns = [
+      // Pattern for "buy me Pepe instead"
+      /buy\s+me\s+([A-Za-z]{3,})\s+instead/i,
+      // Pattern for "protect my usdc for usdt" - specific for your case
+      /protect\s+my\s+[A-Za-z]{3,}\s+for\s+([A-Za-z]{3,})/i,
       // Specific patterns for complex phrases - put these first
       /(?:and\s+)?(?:would\s+)?want\s+to\s+receive\s+([A-Za-z]{3,})\s+in\s+its\s+place/i,
       /receive\s+([A-Za-z]{3,})\s+in\s+its\s+place/i,
@@ -356,6 +613,65 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
         }
       }
     }
+    
+    // Fallback: try to extract any currency-like words if main patterns didn't work
+    if (!extracted.sell_coin || !extracted.buy_coin) {
+      const allCurrencyMatches = input.match(/\b[A-Z]{3,5}\b/gi);
+      if (allCurrencyMatches) {
+        for (const match of allCurrencyMatches) {
+          const normalized = normalizeCurrency(match);
+          if (normalized) {
+            if (!extracted.sell_coin) {
+              extracted.sell_coin = normalized;
+            } else if (!extracted.buy_coin && normalized !== extracted.sell_coin) {
+              extracted.buy_coin = normalized;
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    // Fallback: extract any numbers if amount wasn't found
+    if (!extracted.no_of_sell_coins) {
+      // Check if the input suggests no specific amount (using words like "them", "my holdings", etc.)
+      const noAmountIndicators = /\b(them|my\s+holdings?|my\s+\w+\s+holdings?|all\s+my)\b/i;
+      const hasNoAmountIndicator = noAmountIndicators.test(input);
+      
+      if (!hasNoAmountIndicator) {
+        // Look for standalone numbers that are NOT part of a percentage
+        // This regex ensures the number is not preceded or followed by digits that would make it part of a percentage
+        const numberMatches = input.match(/\b(\d+(?:\.\d+)?)\b/g);
+        if (numberMatches) {
+          for (const numStr of numberMatches) {
+            // Check if this number is part of a percentage in the original input
+            const isPartOfPercentage = input.includes(numStr + '%') || 
+                                     input.match(new RegExp('\\d*' + numStr + '\\d*%')) ||
+                                     extracted.threshold === numStr;
+            
+            if (!isPartOfPercentage) {
+              extracted.no_of_sell_coins = numStr;
+              console.log("Amount extracted:", numStr, "(not part of percentage)");
+              break;
+            } else {
+              console.log("Skipping number", numStr, "as it's part of a percentage");
+            }
+          }
+        }
+      } else {
+        console.log("No amount extraction attempted - detected unspecified amount indicator:", input.match(noAmountIndicators)?.[0]);
+      }
+    }
+    
+    // Fallback: extract any percentage if threshold wasn't found
+    if (!extracted.threshold) {
+      const percentMatch = input.match(/(\d+(?:\.\d+)?)%/);
+      if (percentMatch) {
+        extracted.threshold = percentMatch[1];
+      }
+    }
+    
+    console.log("Final extracted params:", extracted);
     
     return extracted;
   };
@@ -615,6 +931,28 @@ Would you like me to proceed with creating this stop order? (Type "yes" to confi
       
       // If we're in trading mode, handle parameter collection
       if (needsTradingParams) {
+        // Check if user wants to cancel the trading setup
+        const lowerMessage = lastMessage.toLowerCase().trim();
+        if (lowerMessage === "cancel" || lowerMessage === "stop" || lowerMessage === "quit" || lowerMessage === "exit") {
+          setMessages((prevMessages) => [
+            ...prevMessages,
+            {
+              role: "system",
+              content: "❌ Stop order setup cancelled. No worries! Feel free to set up a new stop order anytime by saying 'stop order'.",
+            },
+          ]);
+          // Reset all parameters and exit trading mode
+          setTradingParams({
+            sell_coin: "",
+            buy_coin: "",
+            no_of_sell_coins: "",
+            threshold: ""
+          });
+          setNeedsTradingParams(false);
+          setLastQuestion("");
+          return;
+        }
+        
         const extracted = extractTradingParams(lastMessage, lastQuestion);
         console.log("Extracted params:", extracted, "from message:", lastMessage, "with context:", lastQuestion);
         
