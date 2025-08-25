@@ -283,13 +283,6 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       return normalized;
     }
     
-    // If not found in mapping, return uppercase if it looks like a valid currency (3-5 chars)
-    const upperCurrency = currency.toUpperCase();
-    if (upperCurrency.length >= 3 && upperCurrency.length <= 5 && /^[A-Z]+$/.test(upperCurrency)) {
-      console.log("Currency accepted as-is:", upperCurrency);
-      return upperCurrency;
-    }
-    
     console.log("Currency not recognized:", currency);
     return ''; // Return empty for unrecognized currencies
   };
@@ -1086,23 +1079,30 @@ Remember: You're a helpful assistant first, trading setup assistant second (only
       const response = await result.response;
       const text = response.text();
 
-      // Extract parameters from AI response if we're in trading mode
-      if (needsTradingParams && text) {
+      // ALWAYS extract parameters from AI response to capture user intent
+      if (text) {
         const extractedFromAI = extractParamsFromAIResponse(text);
         console.log("Extracted params from AI response:", extractedFromAI);
         
-        if (Object.keys(extractedFromAI).length > 0) {
-          // Update trading parameters with AI-extracted values
+        // Only update params if we have any trading context or if AI found parameters
+        if (needsTradingParams || Object.keys(extractedFromAI).length > 0) {
           let newParams = { ...tradingParams };
-          Object.keys(extractedFromAI).forEach(key => {
-            const value = extractedFromAI[key as keyof typeof extractedFromAI];
-            if (value && value.trim() !== '') {
-              newParams[key as keyof TradingParams] = value;
-            }
-          });
-          
+          if (extractedFromAI.sell_coin) {
+            const normSell = normalizeCurrency(extractedFromAI.sell_coin);
+            if (normSell) newParams.sell_coin = normSell;
+          }
+          if (extractedFromAI.buy_coin) {
+            const normBuy = normalizeCurrency(extractedFromAI.buy_coin);
+            if (normBuy) newParams.buy_coin = normBuy;
+          }
+          if (extractedFromAI.no_of_sell_coins) {
+            newParams.no_of_sell_coins = extractedFromAI.no_of_sell_coins;
+          }
+          if (extractedFromAI.threshold) {
+            newParams.threshold = extractedFromAI.threshold;
+          }
           setTradingParams(newParams);
-          console.log("Updated trading params from AI response:", newParams);
+          console.log("Updated trading params from AI response (with mapping):", newParams);
         }
       }
 
