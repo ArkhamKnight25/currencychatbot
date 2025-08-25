@@ -416,12 +416,6 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
     
     // Extract sell_coin and amount - improved patterns
     const sellPatterns = [
-      // Pattern for "make stop order sell 750 ATOM get USDT" - HIGHEST PRIORITY
-      /(?:make\s+)?stop\s+order\s+sell\s+(\d+(?:\.\d+)?)\s+([A-Za-z]{3,})\s+get\s+([A-Za-z]{3,})/i,
-      // Alternative pattern for "sell 750 ATOM get USDT" without "stop order"
-      /sell\s+(\d+(?:\.\d+)?)\s+([A-Za-z]{3,})\s+get\s+([A-Za-z]{3,})/i,
-      // Pattern for "auto sell my ICP for USDC at 17% loss" - captures sell and buy currencies
-      /auto\s+sell\s+my\s+([A-Za-z]{3,})\s+for\s+([A-Za-z]{3,})\s+at\s+\d+%\s+loss/i,
       // Pattern for "make stop order sell 750 ATOM get USDT" - EXACT MATCH for this format
       /(?:make\s+)?stop\s+order\s+sell\s+(\d+(?:\.\d+)?)\s+([A-Za-z]{3,})\s+get\s+([A-Za-z]{3,})/i,
       // Pattern for "swap 1000 ADA for USDC" - captures amount, sell currency, and buy currency
@@ -463,14 +457,13 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       const match = input.match(pattern);
       if (match) {
         console.log("Sell pattern matched:", pattern.source, "with groups:", match);
-        
-        // Check if this is a "sell X CURRENCY get CURRENCY" pattern (our new high-priority patterns)
-        if (pattern.source.includes('sell') && pattern.source.includes('get') && match.length >= 4) {
-          console.log("Processing sell-get pattern - full match:", match);
+        if (pattern.source.includes('stop') && pattern.source.includes('order') && pattern.source.includes('sell') && pattern.source.includes('get') && !pattern.source.includes('(?!\\s*%)')) {
+          // Special case for "make stop order sell 750 ATOM get USDT" - NEW EXACT PATTERN
+          console.log("Processing NEW stop order sell pattern - full match:", match);
           const amount = match[1];
           const sellCurrency = normalizeCurrency(match[2]);
           const buyCurrency = normalizeCurrency(match[3]);
-          console.log("Extracted from sell-get pattern:", { amount, sellCurrency, buyCurrency });
+          console.log("Extracted from NEW stop order sell:", { amount, sellCurrency, buyCurrency });
           if (sellCurrency) {
             extracted.sell_coin = sellCurrency;
             console.log("Set sell_coin to:", sellCurrency);
@@ -484,13 +477,14 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
             console.log("Set amount to:", amount);
           }
           swapPatternMatched = true;
-          console.log("Sell-get pattern processed, swapPatternMatched set to true");
-        } else if (pattern.source.includes('auto') && pattern.source.includes('sell') && pattern.source.includes('my') && pattern.source.includes('for')) {
-          // Special case for "auto sell my ICP for USDC at 17% loss"
-          console.log("Processing auto sell pattern - full match:", match);
-          const sellCurrency = normalizeCurrency(match[1]);
-          const buyCurrency = normalizeCurrency(match[2]);
-          console.log("Extracted from auto sell pattern:", { sellCurrency, buyCurrency });
+          console.log("NEW Stop order sell pattern processed, swapPatternMatched set to true");
+        } else if (pattern.source.includes('stop') && pattern.source.includes('order') && pattern.source.includes('sell') && pattern.source.includes('get')) {
+          // Special case for "make stop order sell 750 ATOM get USDT"
+          console.log("Processing stop order sell pattern - full match:", match);
+          const amount = match[1];
+          const sellCurrency = normalizeCurrency(match[2]);
+          const buyCurrency = normalizeCurrency(match[3]);
+          console.log("Extracted from stop order sell:", { amount, sellCurrency, buyCurrency });
           if (sellCurrency) {
             extracted.sell_coin = sellCurrency;
             console.log("Set sell_coin to:", sellCurrency);
@@ -499,8 +493,12 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
             extracted.buy_coin = buyCurrency;
             console.log("Set buy_coin to:", buyCurrency);
           }
+          if (amount) {
+            extracted.no_of_sell_coins = amount;
+            console.log("Set amount to:", amount);
+          }
           swapPatternMatched = true;
-          console.log("Auto sell pattern processed, swapPatternMatched set to true");
+          console.log("Stop order sell pattern processed, swapPatternMatched set to true");
         } else if (pattern.source.includes('swap') && pattern.source.includes('for')) {
           // Special case for "swap 1000 ADA for USDC"
           console.log("Processing swap pattern - full match:", match);
