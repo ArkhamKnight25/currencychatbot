@@ -1251,11 +1251,20 @@ You can help with:
 
 ONLY if the user specifically mentions "stop order" or "stop orders", then you should help them set up trading parameters using our simple 4-parameter system.
 
-For stop orders, ONLY ask for these 4 things:
-1. What currency are you selling?
-2. What currency do you want to buy?
-3. How many coins are you selling?
-4. What's your threshold percentage?
+IMPORTANT STOP ORDER RESPONSE RULES:
+1. ALWAYS analyze the user's message first and extract what you can understand
+2. For parameters you extracted/assumed, show them in brackets like (VET), (USDC), (38%) - DO NOT ask questions for these
+3. ONLY ask questions for parameters that are truly missing or unclear
+4. When asking questions, always include examples in brackets like: "How many VET are you selling? (e.g. 1000)"
+5. Be concise and avoid redundant questions
+
+For stop orders, the 4 parameters are:
+1. Sell currency - show as (CURRENCY) if extracted, ask "What currency are you selling? (e.g. BTC)" if missing
+2. Buy currency - show as (CURRENCY) if extracted, ask "What currency do you want to buy? (e.g. USDC)" if missing  
+3. Amount - ask "How many [CURRENCY] are you selling? (e.g. 100)" if missing
+4. Threshold - show as (X%) if extracted, ask "What's your threshold percentage? (e.g. 15%)" if missing
+
+Example good response: "I see you want to sell (VET) for (USDC) at (38%) threshold. How many VET are you selling? (e.g. 1000)"
 
 Do NOT ask about exchanges, entry prices, market prices, or other complex details.`;
 
