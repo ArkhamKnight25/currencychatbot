@@ -178,11 +178,186 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       'stop loss',
       'protect my',
       'stop loss of',
-      'at a stop loss'
+      'at a stop loss',
+      'trigger sell order',
+      'trigger sell',
+      'trigger order',
+      'auto sell',
+      'automatically sell',
+      'sell order'
     ];
     
     const lowerInput = input.toLowerCase();
     return tradingKeywords.some(keyword => lowerInput.includes(keyword));
+  };
+
+  // Normalize currency names and validate known currencies
+  const normalizeCurrency = (currency: string): string => {
+    // Skip common trading/command words that aren't currencies
+    const nonCurrencyWords = ['stop', 'order', 'loss', 'buy', 'sell', 'for', 'and', 'the', 'with', 'from', 'into', 'swap', 'protect'];
+    if (nonCurrencyWords.includes(currency.toLowerCase())) {
+      console.log("Rejecting non-currency word:", currency);
+      return '';
+    }
+    
+    // Create currency mapping from common variations
+    const commonVariations: { [key: string]: string } = {
+      'usdc': 'USDC',
+      'usd coin': 'USDC',
+      'usdt': 'USDT', 
+      'tether': 'USDT',
+      'dai': 'DAI',
+      'ethereum': 'ETH',
+      'eth': 'ETH',
+      'bitcoin': 'BTC',
+      'btc': 'BTC',
+      'matic': 'MATIC',
+      'polygon': 'MATIC',
+      'chainlink': 'LINK',
+      'link': 'LINK',
+      'solana': 'SOL',
+      'sol': 'SOL',
+      'binance': 'BNB',
+      'bnb': 'BNB',
+      'cardano': 'ADA',
+      'ada': 'ADA',
+      'avalanche': 'AVAX',
+      'avax': 'AVAX',
+      'polkadot': 'DOT',
+      'dot': 'DOT',
+      'uniswap': 'UNI',
+      'uni': 'UNI',
+      'algorand': 'ALGO',
+      'algo': 'ALGO',
+      'cosmos': 'ATOM',
+      'atom': 'ATOM',
+      'fantom': 'FTM',
+      'ftm': 'FTM',
+      'near': 'NEAR',
+      'sandbox': 'SAND',
+      'sand': 'SAND',
+      'decentraland': 'MANA',
+      'mana': 'MANA',
+      'dogecoin': 'DOGE',
+      'doge': 'DOGE',
+      'litecoin': 'LTC',
+      'ltc': 'LTC',
+      'cronos': 'CRO',
+      'cro': 'CRO',
+      'shiba': 'SHIB',
+      'shib': 'SHIB',
+      'compound': 'COMP',
+      'comp': 'COMP',
+      'graph': 'GRT',
+      'grt': 'GRT',
+      'aave': 'AAVE',
+      'luna': 'LUNA',
+      'internet computer': 'ICP',
+      'icp': 'ICP',
+      'flow': 'FLOW',
+      'theta': 'THETA',
+      'enjin': 'ENJ',
+      'enj': 'ENJ',
+      'vechain': 'VET',
+      'vet': 'VET',
+      'hedera': 'HBAR',
+      'hbar': 'HBAR',
+      'wrapped bitcoin': 'WBTC',
+      'wbtc': 'WBTC',
+      'wrapped ethereum': 'WETH',
+      'weth': 'WETH',
+      'xai': 'XAI',
+      'euros': 'EURS',
+      'eurs': 'EURS',
+      'xavi': 'XAVI',
+      'pepe': 'PEPE',
+      'busd': 'BUSD',
+      'tokena': 'TokenA',
+      'tokenb': 'TokenB'
+    };
+    
+    // Check common variations first
+    const normalized = commonVariations[currency.toLowerCase()];
+    if (normalized) {
+      console.log("Currency normalized:", currency, "->", normalized);
+      return normalized;
+    }
+    
+    // If not found in mapping, return uppercase if it looks like a valid currency (3-5 chars)
+    const upperCurrency = currency.toUpperCase();
+    if (upperCurrency.length >= 3 && upperCurrency.length <= 5 && /^[A-Z]+$/.test(upperCurrency)) {
+      console.log("Currency accepted as-is:", upperCurrency);
+      return upperCurrency;
+    }
+    
+    console.log("Currency not recognized:", currency);
+    return ''; // Return empty for unrecognized currencies
+  };
+
+  // Function to extract parameters from AI's response when it mentions or assumes values
+  const extractParamsFromAIResponse = (aiResponse: string): Partial<TradingParams> => {
+    const extracted: Partial<TradingParams> = {};
+    
+    // Look for patterns where AI mentions currencies
+    // "We'll assume it's ICP" or "it's ICP based on your request"
+    const assumePatterns = [
+      /assume\s+it'?s\s+([A-Z]{2,10})/i,
+      /it'?s\s+([A-Z]{2,10})\s+based\s+on/i,
+      /selling\?\s*\([^)]*it'?s\s+([A-Z]{2,10})/i,
+      /currency\s+are\s+you\s+selling\?\s*\([^)]*([A-Z]{2,10})/i
+    ];
+    
+    // "You mentioned USDC"
+    const mentionedPatterns = [
+      /you\s+mentioned\s+([A-Z]{2,10})/i,
+      /you\s+want\s+to\s+buy\?\s*\([^)]*([A-Z]{2,10})/i,
+      /buy\?\s*\([^)]*mentioned\s+([A-Z]{2,10})/i
+    ];
+    
+    // "You mentioned 17% loss" or similar threshold patterns
+    const thresholdPatterns = [
+      /you\s+mentioned\s+(\d+(?:\.\d+)?)\s*%\s*loss/i,
+      /(\d+(?:\.\d+)?)\s*%\s*loss[^?]*please\s+confirm/i,
+      /threshold\s+percentage\?\s*\([^)]*(\d+(?:\.\d+)?)\s*%/i
+    ];
+    
+    // Check for sell currency (first currency mentioned in assumptions)
+    for (const pattern of assumePatterns) {
+      const match = aiResponse.match(pattern);
+      if (match && match[1]) {
+        const currency = normalizeCurrency(match[1]);
+        if (currency) {
+          extracted.sell_coin = currency;
+          console.log("Extracted sell_coin from AI assumption:", currency);
+          break;
+        }
+      }
+    }
+    
+    // Check for buy currency (mentioned currencies)
+    for (const pattern of mentionedPatterns) {
+      const match = aiResponse.match(pattern);
+      if (match && match[1]) {
+        const currency = normalizeCurrency(match[1]);
+        if (currency) {
+          extracted.buy_coin = currency;
+          console.log("Extracted buy_coin from AI mention:", currency);
+          break;
+        }
+      }
+    }
+    
+    // Check for threshold
+    for (const pattern of thresholdPatterns) {
+      const match = aiResponse.match(pattern);
+      if (match && match[1]) {
+        extracted.threshold = `${match[1]}%`;
+        console.log("Extracted threshold from AI mention:", extracted.threshold);
+        break;
+      }
+    }
+    
+    return extracted;
   };
 
   // Function to generate a beautiful trading setup message using AI
@@ -192,9 +367,12 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
     
     // FIRST: Extract threshold from percentage mentions (highest priority)
     const thresholdPatterns = [
+      // Pattern for "at 17% loss" in auto sell orders
+      /at\s+(\d+(?:\.\d+)?)%\s*loss/i,
+      // Pattern for "when down 41%" in trigger sell orders
+      /when\s+down\s+(\d+(?:\.\d+)?)%?/i,
       /(?:about\s+)?(?:a\s+)?(\d+(?:\.\d+)?)%?\s*threshold/i,
       /threshold.*?(?:about\s+)?(?:a\s+)?(\d+(?:\.\d+)?)%?/i,
-      /at\s+(?:about\s+)?(\d+(?:\.\d+)?)%\s*loss/i,
       /(\d+(?:\.\d+)?)%\s*loss/i,
       /loss\s+(?:of\s+)?(\d+(?:\.\d+)?)%/i,
       /for\s+(?:about\s+)?(?:a\s+)?(\d+(?:\.\d+)?)%/i,
@@ -260,109 +438,6 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       console.log("Skipping pattern matching - currencies already extracted from direct patterns");
     }
     
-    // Normalize currency names and validate known currencies
-    const normalizeCurrency = (currency: string): string => {
-      // Skip common trading/command words that aren't currencies
-      const nonCurrencyWords = ['stop', 'order', 'loss', 'buy', 'sell', 'for', 'and', 'the', 'with', 'from', 'into', 'swap', 'protect'];
-      if (nonCurrencyWords.includes(currency.toLowerCase())) {
-        console.log("Rejecting non-currency word:", currency);
-        return '';
-      }
-      
-      // Create currency mapping from common variations
-      const commonVariations: { [key: string]: string } = {
-        'usdc': 'USDC',
-        'usd coin': 'USDC',
-        'usdt': 'USDT', 
-        'tether': 'USDT',
-        'dai': 'DAI',
-        'ethereum': 'ETH',
-        'eth': 'ETH',
-        'bitcoin': 'BTC',
-        'btc': 'BTC',
-        'matic': 'MATIC',
-        'polygon': 'MATIC',
-        'chainlink': 'LINK',
-        'link': 'LINK',
-        'solana': 'SOL',
-        'sol': 'SOL',
-        'binance': 'BNB',
-        'bnb': 'BNB',
-        'cardano': 'ADA',
-        'ada': 'ADA',
-        'avalanche': 'AVAX',
-        'avax': 'AVAX',
-        'polkadot': 'DOT',
-        'dot': 'DOT',
-        'uniswap': 'UNI',
-        'uni': 'UNI',
-        'algorand': 'ALGO',
-        'algo': 'ALGO',
-        'cosmos': 'ATOM',
-        'atom': 'ATOM',
-        'fantom': 'FTM',
-        'ftm': 'FTM',
-        'near': 'NEAR',
-        'sandbox': 'SAND',
-        'sand': 'SAND',
-        'decentraland': 'MANA',
-        'mana': 'MANA',
-        'dogecoin': 'DOGE',
-        'doge': 'DOGE',
-        'litecoin': 'LTC',
-        'ltc': 'LTC',
-        'cronos': 'CRO',
-        'cro': 'CRO',
-        'shiba': 'SHIB',
-        'shib': 'SHIB',
-        'compound': 'COMP',
-        'comp': 'COMP',
-        'graph': 'GRT',
-        'grt': 'GRT',
-        'aave': 'AAVE',
-        'luna': 'LUNA',
-        'internet computer': 'ICP',
-        'icp': 'ICP',
-        'flow': 'FLOW',
-        'theta': 'THETA',
-        'enjin': 'ENJ',
-        'enj': 'ENJ',
-        'vechain': 'VET',
-        'vet': 'VET',
-        'hedera': 'HBAR',
-        'hbar': 'HBAR',
-        'wrapped bitcoin': 'WBTC',
-        'wbtc': 'WBTC',
-        'wrapped ethereum': 'WETH',
-        'weth': 'WETH',
-        'xai': 'XAI',
-        'euros': 'EURS',
-        'eurs': 'EURS',
-        'xavi': 'XAVI',
-        'pepe': 'PEPE',
-        'busd': 'BUSD',
-        'tokena': 'TokenA',
-        'tokenb': 'TokenB'
-      };
-      
-      // Check common variations first
-      const normalized = commonVariations[currency.toLowerCase()];
-      if (normalized) {
-        console.log("Currency normalized:", currency, "->", normalized);
-        return normalized;
-      }
-      
-      // If not found in mapping, return uppercase if it looks like a valid currency (3-5 chars)
-      const upperCurrency = currency.toUpperCase();
-      if (upperCurrency.length >= 3 && upperCurrency.length <= 5 && /^[A-Z]+$/.test(upperCurrency)) {
-        console.log("Currency accepted as-is:", upperCurrency);
-        return upperCurrency;
-      }
-      
-      console.log("Currency not recognized:", currency);
-      return ''; // Return empty for unrecognized currencies
-    };
-    
     // Context-aware parameter extraction based on last question
     if (lastQuestion) {
       const numberOnly = input.match(/(?:about\s+)?(\d+(?:\.\d+)?)%?$/i);
@@ -416,6 +491,10 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
     
     // Extract sell_coin and amount - improved patterns
     const sellPatterns = [
+      // Pattern for "auto sell my ICP for USDC at 17% loss" - captures sell and buy currencies
+      /(?:auto\s+sell|automatically\s+sell)\s+my\s+([A-Za-z]{3,})\s+for\s+([A-Za-z]{3,})/i,
+      // Pattern for "trigger sell order for my LUNA, get USDT when down 41%" - captures sell and buy currencies
+      /trigger\s+sell\s+order\s+for\s+my\s+([A-Za-z]{3,}),?\s+get\s+([A-Za-z]{3,})/i,
       // Pattern for "make stop order sell 750 ATOM get USDT" - EXACT MATCH for this format
       /(?:make\s+)?stop\s+order\s+sell\s+(\d+(?:\.\d+)?)\s+([A-Za-z]{3,})\s+get\s+([A-Za-z]{3,})/i,
       // Pattern for "swap 1000 ADA for USDC" - captures amount, sell currency, and buy currency
@@ -457,7 +536,37 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       const match = input.match(pattern);
       if (match) {
         console.log("Sell pattern matched:", pattern.source, "with groups:", match);
-        if (pattern.source.includes('stop') && pattern.source.includes('order') && pattern.source.includes('sell') && pattern.source.includes('get') && !pattern.source.includes('(?!\\s*%)')) {
+        if (pattern.source.includes('auto') && pattern.source.includes('sell')) {
+          // Special case for "auto sell my ICP for USDC"
+          console.log("Processing auto sell pattern - full match:", match);
+          const sellCurrency = normalizeCurrency(match[1]);
+          const buyCurrency = normalizeCurrency(match[2]);
+          console.log("Extracted from auto sell:", { sellCurrency, buyCurrency });
+          if (sellCurrency) {
+            extracted.sell_coin = sellCurrency;
+            console.log("Set sell_coin to:", sellCurrency);
+          }
+          if (buyCurrency) {
+            extracted.buy_coin = buyCurrency;
+            console.log("Set buy_coin to:", buyCurrency);
+          }
+          swapPatternMatched = true;
+        } else if (pattern.source.includes('trigger') && pattern.source.includes('sell') && pattern.source.includes('order')) {
+          // Special case for "trigger sell order for my LUNA, get USDT when down 41%"
+          console.log("Processing trigger sell order pattern - full match:", match);
+          const sellCurrency = normalizeCurrency(match[1]);
+          const buyCurrency = normalizeCurrency(match[2]);
+          console.log("Extracted from trigger sell order:", { sellCurrency, buyCurrency });
+          if (sellCurrency) {
+            extracted.sell_coin = sellCurrency;
+            console.log("Set sell_coin to:", sellCurrency);
+          }
+          if (buyCurrency) {
+            extracted.buy_coin = buyCurrency;
+            console.log("Set buy_coin to:", buyCurrency);
+          }
+          swapPatternMatched = true;
+        } else if (pattern.source.includes('stop') && pattern.source.includes('order') && pattern.source.includes('sell') && pattern.source.includes('get') && !pattern.source.includes('(?!\\s*%)')) {
           // Special case for "make stop order sell 750 ATOM get USDT" - NEW EXACT PATTERN
           console.log("Processing NEW stop order sell pattern - full match:", match);
           const amount = match[1];
@@ -769,6 +878,105 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
     return extracted;
   };
 
+  // AI-powered fallback parameter extraction using Gemini
+  const extractTradingParamsWithAI = async (input: string): Promise<Partial<TradingParams>> => {
+    try {
+      const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+      const prompt = `Extract trading parameters from this text: "${input}"
+
+Please analyze and extract ONLY the following parameters:
+1. sell_coin: The currency being sold (use standard symbols like BTC, ETH, USDC, etc.)
+2. buy_coin: The currency being bought (use standard symbols like BTC, ETH, USDC, etc.)
+3. no_of_sell_coins: The amount/quantity being sold (numbers only, no currency symbols)
+4. threshold: The percentage threshold for the stop loss (numbers only, no % symbol)
+
+Respond ONLY in this exact JSON format:
+{
+  "sell_coin": "CURRENCY_SYMBOL_OR_null",
+  "buy_coin": "CURRENCY_SYMBOL_OR_null", 
+  "no_of_sell_coins": "NUMBER_OR_null",
+  "threshold": "NUMBER_OR_null"
+}
+
+Example input: "trigger sell order for my LUNA, get USDT when down 41%"
+Example output: {"sell_coin": "LUNA", "buy_coin": "USDT", "no_of_sell_coins": null, "threshold": "41"}`;
+
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+
+      // Parse the JSON response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const aiExtracted = JSON.parse(jsonMatch[0]);
+        const validated: Partial<TradingParams> = {};
+
+        // Validate and convert AI response
+        if (aiExtracted.sell_coin && aiExtracted.sell_coin !== "null") {
+          const normalizedSell = normalizeCurrency(aiExtracted.sell_coin);
+          if (normalizedSell) validated.sell_coin = normalizedSell;
+        }
+        
+        if (aiExtracted.buy_coin && aiExtracted.buy_coin !== "null") {
+          const normalizedBuy = normalizeCurrency(aiExtracted.buy_coin);
+          if (normalizedBuy) validated.buy_coin = normalizedBuy;
+        }
+        
+        if (aiExtracted.no_of_sell_coins && aiExtracted.no_of_sell_coins !== "null") {
+          const amount = parseFloat(aiExtracted.no_of_sell_coins);
+          if (!isNaN(amount) && amount > 0) validated.no_of_sell_coins = amount.toString();
+        }
+        
+        if (aiExtracted.threshold && aiExtracted.threshold !== "null") {
+          const threshold = parseFloat(aiExtracted.threshold);
+          if (!isNaN(threshold) && threshold > 0 && threshold <= 100) validated.threshold = threshold.toString();
+        }
+
+        console.log("AI extracted params:", validated);
+        return validated;
+      }
+    } catch (error) {
+      console.error("AI extraction failed:", error);
+    }
+    
+    return {};
+  };
+
+  // Enhanced extraction function that uses AI as fallback
+  const extractTradingParamsEnhanced = async (input: string, lastQuestion?: string): Promise<Partial<TradingParams>> => {
+    // First try regex-based extraction
+    const regexExtracted = extractTradingParams(input, lastQuestion);
+    console.log("Regex extracted:", regexExtracted);
+
+    // Check if we have all parameters
+    const missingParams = [];
+    if (!regexExtracted.sell_coin) missingParams.push('sell_coin');
+    if (!regexExtracted.buy_coin) missingParams.push('buy_coin');
+    if (!regexExtracted.no_of_sell_coins) missingParams.push('no_of_sell_coins');
+    if (!regexExtracted.threshold) missingParams.push('threshold');
+
+    // If we're missing critical parameters, try AI extraction
+    if (missingParams.length > 0) {
+      console.log("Missing params:", missingParams, "- trying AI extraction...");
+      const aiExtracted = await extractTradingParamsWithAI(input);
+      
+      // Merge results (regex takes priority, AI fills gaps)
+      const merged = { ...regexExtracted };
+      Object.keys(aiExtracted).forEach(key => {
+        if (!merged[key as keyof TradingParams] && aiExtracted[key as keyof TradingParams]) {
+          merged[key as keyof TradingParams] = aiExtracted[key as keyof TradingParams] || "";
+        }
+      });
+      
+      console.log("Enhanced extraction result:", merged);
+      return merged;
+    }
+
+    return regexExtracted;
+  };
+
   // Function to check if all required parameters are present
   const getMissingParams = (params: TradingParams): string[] => {
     const missing: string[] = [];
@@ -878,6 +1086,26 @@ Remember: You're a helpful assistant first, trading setup assistant second (only
       const response = await result.response;
       const text = response.text();
 
+      // Extract parameters from AI response if we're in trading mode
+      if (needsTradingParams && text) {
+        const extractedFromAI = extractParamsFromAIResponse(text);
+        console.log("Extracted params from AI response:", extractedFromAI);
+        
+        if (Object.keys(extractedFromAI).length > 0) {
+          // Update trading parameters with AI-extracted values
+          let newParams = { ...tradingParams };
+          Object.keys(extractedFromAI).forEach(key => {
+            const value = extractedFromAI[key as keyof typeof extractedFromAI];
+            if (value && value.trim() !== '') {
+              newParams[key as keyof TradingParams] = value;
+            }
+          });
+          
+          setTradingParams(newParams);
+          console.log("Updated trading params from AI response:", newParams);
+        }
+      }
+
       setMessages((prevMessages) => [
         ...prevMessages,
         {
@@ -901,31 +1129,32 @@ Remember: You're a helpful assistant first, trading setup assistant second (only
   };
 
   useEffect(() => {
-    if (messages.length > 0 && messages[messages.length - 1].role === "user" && hasWelcomed) {
-      // Get the last message
-      const lastMessage = messages[messages.length - 1].content;
-      
-      // Check if user is asking about their previous order details
-      const orderQuestions = [
-        'what things did i give',
-        'what did i set',
-        'what are my parameters',
-        'what was my order',
-        'my previous order',
-        'what did i fill',
-        'my stop order'
-      ];
-      
-      const isAskingAboutOrder = orderQuestions.some(q => 
-        lastMessage.toLowerCase().includes(q)
-      );
-      
-      if (isAskingAboutOrder && getMissingParams(tradingParams).length === 0) {
-        setMessages((prevMessages) => [
-          ...prevMessages,
-          {
-            role: "system",
-            content: `Here are your current stop order details:
+    const handleMessage = async () => {
+      if (messages.length > 0 && messages[messages.length - 1].role === "user" && hasWelcomed) {
+        // Get the last message
+        const lastMessage = messages[messages.length - 1].content;
+        
+        // Check if user is asking about their previous order details
+        const orderQuestions = [
+          'what things did i give',
+          'what did i set',
+          'what are my parameters',
+          'what was my order',
+          'my previous order',
+          'what did i fill',
+          'my stop order'
+        ];
+        
+        const isAskingAboutOrder = orderQuestions.some(q => 
+          lastMessage.toLowerCase().includes(q)
+        );
+        
+        if (isAskingAboutOrder && getMissingParams(tradingParams).length === 0) {
+          setMessages((prevMessages) => [
+            ...prevMessages,
+            {
+              role: "system",
+              content: `Here are your current stop order details:
 
 📋 **Your Stop Order:**
 • Sell Currency: ${tradingParams.sell_coin}
@@ -934,56 +1163,56 @@ Remember: You're a helpful assistant first, trading setup assistant second (only
 • Threshold Rate: ${tradingParams.threshold}
 
 Would you like to proceed with creating this stop order? (Type "yes" to confirm or "no" to cancel)`,
-          },
-        ]);
-        return;
-      }
-      
-      // Check if user is confirming or canceling a completed stop order
-      if (!needsTradingParams && getMissingParams(tradingParams).length === 0) {
-        const lowerMessage = lastMessage.toLowerCase().trim();
-        if (lowerMessage === "yes" || lowerMessage === "y" || lowerMessage === "confirm") {
-          setMessages((prevMessages) => [
-            ...prevMessages,
-            {
-              role: "system",
-              content: "✅ Stop order created successfully! Your order has been set up with the specified parameters. The system will monitor the market and execute when your threshold is reached.",
             },
           ]);
-          // Reset parameters for next order
-          setTradingParams({
-            sell_coin: "",
-            buy_coin: "",
-            no_of_sell_coins: "",
-            threshold: ""
-          });
-          return;
-        } else if (lowerMessage === "no" || lowerMessage === "n" || lowerMessage === "cancel") {
-          setMessages((prevMessages) => [
-            ...prevMessages,
-            {
-              role: "system",
-              content: "❌ Stop order cancelled. No worries! Feel free to set up a new stop order anytime by saying 'stop order'.",
-            },
-          ]);
-          // Reset parameters
-          setTradingParams({
-            sell_coin: "",
-            buy_coin: "",
-            no_of_sell_coins: "",
-            threshold: ""
-          });
           return;
         }
-      }
-      
-      // Check if user is requesting trading setup
-      if (checkForTradingRequest(lastMessage) && !needsTradingParams) {
-        setNeedsTradingParams(true);
         
-        // Extract any parameters from this initial message
-        const extracted = extractTradingParams(lastMessage);
-        console.log("Initial extracted params:", extracted, "from message:", lastMessage);
+        // Check if user is confirming or canceling a completed stop order
+        if (!needsTradingParams && getMissingParams(tradingParams).length === 0) {
+          const lowerMessage = lastMessage.toLowerCase().trim();
+          if (lowerMessage === "yes" || lowerMessage === "y" || lowerMessage === "confirm") {
+            setMessages((prevMessages) => [
+              ...prevMessages,
+              {
+                role: "system",
+                content: "✅ Stop order created successfully! Your order has been set up with the specified parameters. The system will monitor the market and execute when your threshold is reached.",
+              },
+            ]);
+            // Reset parameters for next order
+            setTradingParams({
+              sell_coin: "",
+              buy_coin: "",
+              no_of_sell_coins: "",
+              threshold: ""
+            });
+            return;
+          } else if (lowerMessage === "no" || lowerMessage === "n" || lowerMessage === "cancel") {
+            setMessages((prevMessages) => [
+              ...prevMessages,
+              {
+                role: "system",
+                content: "❌ Stop order cancelled. No worries! Feel free to set up a new stop order anytime by saying 'stop order'.",
+              },
+            ]);
+            // Reset parameters
+            setTradingParams({
+              sell_coin: "",
+              buy_coin: "",
+              no_of_sell_coins: "",
+              threshold: ""
+            });
+            return;
+          }
+        }
+        
+        // Check if user is requesting trading setup
+        if (checkForTradingRequest(lastMessage) && !needsTradingParams) {
+          setNeedsTradingParams(true);
+          
+          // Extract any parameters from this initial message using enhanced AI extraction
+          const extracted = await extractTradingParamsEnhanced(lastMessage);
+          console.log("Initial extracted params:", extracted, "from message:", lastMessage);
         
         let newParams = { ...tradingParams };
         if (Object.keys(extracted).length > 0) {
@@ -1059,7 +1288,7 @@ Would you like me to proceed with creating this stop order? (Type "yes" to confi
           return;
         }
         
-        const extracted = extractTradingParams(lastMessage, lastQuestion);
+        const extracted = await extractTradingParamsEnhanced(lastMessage, lastQuestion);
         console.log("Extracted params:", extracted, "from message:", lastMessage, "with context:", lastQuestion);
         
         // Update trading parameters if any were found
@@ -1111,11 +1340,13 @@ Would you like me to proceed with creating this stop order? (Type "yes" to confi
         }
         return;
       } else {
-        // Normal conversation mode - proceed with AI inference directly
         inference();
       }
+    };
     }
-  }, [messages, hasWelcomed]);
+    
+    handleMessage();
+  }, [messages]);
 
   const sendMessage = async (event?: React.FormEvent) => {
     if (event) event.preventDefault();
