@@ -287,9 +287,179 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
     return ''; // Return empty for unrecognized currencies
   };
 
+  // Hidden AI parameter extraction - asks 4 specific questions to extract trading params
+  const extractParamsWithHiddenAI = async (userInput: string): Promise<Partial<TradingParams>> => {
+    try {
+      const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+      const hiddenPrompt = `Analyze this user message and answer these 4 questions with ONLY the exact values or "null":
+
+User message: "${userInput}"
+
+1. What cryptocurrency is the user selling? (answer with currency symbol like BTC, ETH, USDC, COMP, etc. or "null")
+2. What cryptocurrency does the user want to buy? (answer with currency symbol like BTC, ETH, USDC, USDT, etc. or "null") 
+3. How many coins/tokens is the user selling? (answer with number only or "null")
+4. What is the threshold percentage for stop loss? (answer with number only, no % symbol, or "null")
+
+Answer format (one answer per line):
+1. [CURRENCY_OR_null]
+2. [CURRENCY_OR_null]
+3. [NUMBER_OR_null]
+4. [NUMBER_OR_null]
+
+Example for "protect my COMP holdings, sell for USDT at 34% loss":
+1. COMP
+2. USDT
+3. null
+4. 34`;
+
+      const result = await model.generateContent(hiddenPrompt);
+      const response = await result.response;
+      const text = response.text();
+
+      console.log("Hidden AI extraction response:", text);
+
+      // Parse the numbered responses
+      const lines = text.split('\n').filter(line => line.trim());
+      const extracted: Partial<TradingParams> = {};
+
+      for (const line of lines) {
+        const match = line.match(/(\d+)\.\s*(.+)/);
+        if (match) {
+          const questionNumber = parseInt(match[1]);
+          const answer = match[2].trim();
+
+          if (answer !== "null" && answer !== "NULL") {
+            switch (questionNumber) {
+              case 1: // Sell currency
+                const sellCurrency = normalizeCurrency(answer);
+                if (sellCurrency) {
+                  extracted.sell_coin = sellCurrency;
+                  console.log("Hidden AI extracted sell_coin:", sellCurrency);
+                }
+                break;
+              case 2: // Buy currency
+                const buyCurrency = normalizeCurrency(answer);
+                if (buyCurrency) {
+                  extracted.buy_coin = buyCurrency;
+                  console.log("Hidden AI extracted buy_coin:", buyCurrency);
+                }
+                break;
+              case 3: // Amount
+                const amount = parseFloat(answer);
+                if (!isNaN(amount) && amount > 0) {
+                  extracted.no_of_sell_coins = amount.toString();
+                  console.log("Hidden AI extracted amount:", amount);
+                }
+                break;
+              case 4: // Threshold
+                const threshold = parseFloat(answer);
+                if (!isNaN(threshold) && threshold > 0 && threshold <= 100) {
+                  extracted.threshold = threshold.toString();
+                  console.log("Hidden AI extracted threshold:", threshold);
+                }
+                break;
+            }
+          }
+        }
+      }
+
+      console.log("Final hidden AI extracted params:", extracted);
+      return extracted;
+
+    } catch (error) {
+      console.error("Hidden AI extraction error:", error);
+      return {};
+    }
+  };
+
   // Function to extract parameters from AI's response when it mentions or assumes values
   const extractParamsFromAIResponse = (aiResponse: string): Partial<TradingParams> => {
     const extracted: Partial<TradingParams> = {};
+    
+    // NEW: Look for patterns with parentheses - like "(COMP)" or "(USDT)" or "(34%)"
+    const bracketPatterns = [
+      // Pattern for currencies in parentheses: "(COMP)", "(USDT)"
+      /\(([A-Z]{2,10})\)/gi,
+      // Pattern for percentages in parentheses: "(34%)"
+      /\((\d+(?:\.\d+)?%?)\)/gi,
+      // Pattern for numbers in parentheses: "(100)"
+      /\((\d+(?:\.\d+)?)\)/gi
+    ];
+    
+    // Extract all bracketed values
+    const bracketMatches = [];
+    for (const pattern of bracketPatterns) {
+      let match;
+      while ((match = pattern.exec(aiResponse)) !== null) {
+        bracketMatches.push(match[1]);
+      }
+    }
+    
+    console.log("Found bracketed values in AI response:", bracketMatches);
+    
+    // Process bracketed values
+    for (const value of bracketMatches) {
+      // Check if it's a percentage
+      if (value.includes('%') || /^\d+(?:\.\d+)?$/.test(value)) {
+        const numericValue = value.replace('%', '');
+        if (!isNaN(parseFloat(numericValue))) {
+          extracted.threshold = numericValue;
+          console.log("Extracted threshold from brackets:", numericValue);
+        }
+      } else {
+        // Check if it's a currency
+        const currency = normalizeCurrency(value);
+        if (currency) {
+          // Determine if it's sell or buy currency based on context
+          if (!extracted.sell_coin) {
+            extracted.sell_coin = currency;
+            console.log("Extracted sell_coin from brackets:", currency);
+          } else if (!extracted.buy_coin) {
+            extracted.buy_coin = currency;
+            console.log("Extracted buy_coin from brackets:", currency);
+          }
+        }
+      }
+    }
+    
+    // NEW: Look for direct question patterns with currencies
+    const questionPatterns = [
+      // "What currency are you selling? (COMP)"
+      /What\s+currency\s+are\s+you\s+selling\?\s*\([^)]*([A-Z]{2,10})/i,
+      // "What currency do you want to buy? (USDT)"
+      /What\s+currency\s+do\s+you\s+want\s+to\s+buy\?\s*\([^)]*([A-Z]{2,10})/i,
+      // "What's your threshold percentage? (34%)"
+      /What'?s\s+your\s+threshold\s+percentage\?\s*\([^)]*(\d+(?:\.\d+)?%?)/i,
+      // "How many [CURRENCY] are you selling?"
+      /How\s+many\s+([A-Z]{2,10})\s+are\s+you\s+selling/i
+    ];
+    
+    for (const pattern of questionPatterns) {
+      const match = aiResponse.match(pattern);
+      if (match && match[1]) {
+        if (pattern.source.includes('selling')) {
+          const currency = normalizeCurrency(match[1]);
+          if (currency && !extracted.sell_coin) {
+            extracted.sell_coin = currency;
+            console.log("Extracted sell_coin from question pattern:", currency);
+          }
+        } else if (pattern.source.includes('buy')) {
+          const currency = normalizeCurrency(match[1]);
+          if (currency && !extracted.buy_coin) {
+            extracted.buy_coin = currency;
+            console.log("Extracted buy_coin from question pattern:", currency);
+          }
+        } else if (pattern.source.includes('threshold')) {
+          const value = match[1].replace('%', '');
+          if (!isNaN(parseFloat(value))) {
+            extracted.threshold = value;
+            console.log("Extracted threshold from question pattern:", value);
+          }
+        }
+      }
+    }
     
     // Look for patterns where AI mentions currencies
     // "We'll assume it's ICP" or "it's ICP based on your request"
@@ -319,7 +489,7 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       const match = aiResponse.match(pattern);
       if (match && match[1]) {
         const currency = normalizeCurrency(match[1]);
-        if (currency) {
+        if (currency && !extracted.sell_coin) {
           extracted.sell_coin = currency;
           console.log("Extracted sell_coin from AI assumption:", currency);
           break;
@@ -332,7 +502,7 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       const match = aiResponse.match(pattern);
       if (match && match[1]) {
         const currency = normalizeCurrency(match[1]);
-        if (currency) {
+        if (currency && !extracted.buy_coin) {
           extracted.buy_coin = currency;
           console.log("Extracted buy_coin from AI mention:", currency);
           break;
@@ -344,7 +514,7 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
     for (const pattern of thresholdPatterns) {
       const match = aiResponse.match(pattern);
       if (match && match[1]) {
-        extracted.threshold = `${match[1]}%`;
+        extracted.threshold = `${match[1]}`;
         console.log("Extracted threshold from AI mention:", extracted.threshold);
         break;
       }
@@ -360,6 +530,10 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
     
     // FIRST: Extract threshold from percentage mentions (highest priority)
     const thresholdPatterns = [
+      // Pattern for "if the loss reaches 34%"
+      /if\s+the\s+loss\s+reaches\s+(\d+(?:\.\d+)?)%?/i,
+      // Pattern for "loss reaches 34%"
+      /loss\s+reaches\s+(\d+(?:\.\d+)?)%?/i,
       // Pattern for "at 17% loss" in auto sell orders
       /at\s+(\d+(?:\.\d+)?)%\s*loss/i,
       // Pattern for "when down 41%" in trigger sell orders
@@ -484,6 +658,14 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
     
     // Extract sell_coin and amount - improved patterns
     const sellPatterns = [
+      // NEW: Pattern for "protection for my COMP holdings, I want to sell for USDT"
+      /(?:set\s+up\s+)?protection\s+for\s+my\s+([A-Za-z]{3,})\s+holdings.*?sell\s+for\s+([A-Za-z]{3,})/i,
+      // NEW: Pattern for "protect my COMP holdings" - specific for holdings
+      /protect(?:ion)?\s+(?:for\s+)?my\s+([A-Za-z]{3,})\s+holdings/i,
+      // NEW: Pattern for "I want to sell for USDT"
+      /I\s+want\s+to\s+sell\s+for\s+([A-Za-z]{3,})/i,
+      // NEW: Pattern for "sell for USDT if"
+      /sell\s+for\s+([A-Za-z]{3,})\s+if/i,
       // Pattern for "auto sell my ICP for USDC at 17% loss" - captures sell and buy currencies
       /(?:auto\s+sell|automatically\s+sell)\s+my\s+([A-Za-z]{3,})\s+for\s+([A-Za-z]{3,})/i,
       // Pattern for "trigger sell order for my LUNA, get USDT when down 41%" - captures sell and buy currencies
@@ -529,7 +711,54 @@ const Chat: React.FC<ChatProps> = ({ chatId, chatName }) => {
       const match = input.match(pattern);
       if (match) {
         console.log("Sell pattern matched:", pattern.source, "with groups:", match);
-        if (pattern.source.includes('auto') && pattern.source.includes('sell')) {
+        
+        // NEW: Handle "protection for my COMP holdings, I want to sell for USDT"
+        if (pattern.source.includes('protection') && pattern.source.includes('holdings') && pattern.source.includes('sell')) {
+          console.log("Processing protection holdings pattern - full match:", match);
+          const sellCurrency = normalizeCurrency(match[1]);
+          const buyCurrency = normalizeCurrency(match[2]);
+          console.log("Extracted from protection holdings:", { sellCurrency, buyCurrency });
+          if (sellCurrency) {
+            extracted.sell_coin = sellCurrency;
+            console.log("Set sell_coin to:", sellCurrency);
+          }
+          if (buyCurrency) {
+            extracted.buy_coin = buyCurrency;
+            console.log("Set buy_coin to:", buyCurrency);
+          }
+          swapPatternMatched = true;
+        }
+        // NEW: Handle "protect my COMP holdings" - just sell currency
+        else if (pattern.source.includes('protect') && pattern.source.includes('holdings')) {
+          console.log("Processing protect holdings pattern - full match:", match);
+          const sellCurrency = normalizeCurrency(match[1]);
+          console.log("Extracted sell currency from protect holdings:", sellCurrency);
+          if (sellCurrency) {
+            extracted.sell_coin = sellCurrency;
+            console.log("Set sell_coin to:", sellCurrency);
+          }
+        }
+        // NEW: Handle "I want to sell for USDT" - just buy currency
+        else if (pattern.source.includes('I\\s+want\\s+to\\s+sell\\s+for')) {
+          console.log("Processing 'I want to sell for' pattern - full match:", match);
+          const buyCurrency = normalizeCurrency(match[1]);
+          console.log("Extracted buy currency from 'I want to sell for':", buyCurrency);
+          if (buyCurrency) {
+            extracted.buy_coin = buyCurrency;
+            console.log("Set buy_coin to:", buyCurrency);
+          }
+        }
+        // NEW: Handle "sell for USDT if" - just buy currency
+        else if (pattern.source.includes('sell\\s+for') && pattern.source.includes('if')) {
+          console.log("Processing 'sell for currency if' pattern - full match:", match);
+          const buyCurrency = normalizeCurrency(match[1]);
+          console.log("Extracted buy currency from 'sell for if':", buyCurrency);
+          if (buyCurrency) {
+            extracted.buy_coin = buyCurrency;
+            console.log("Set buy_coin to:", buyCurrency);
+          }
+        }
+        else if (pattern.source.includes('auto') && pattern.source.includes('sell')) {
           // Special case for "auto sell my ICP for USDC"
           console.log("Processing auto sell pattern - full match:", match);
           const sellCurrency = normalizeCurrency(match[1]);
@@ -1084,25 +1313,36 @@ Remember: You're a helpful assistant first, trading setup assistant second (only
         const extractedFromAI = extractParamsFromAIResponse(text);
         console.log("Extracted params from AI response:", extractedFromAI);
         
-        // Only update params if we have any trading context or if AI found parameters
-        if (needsTradingParams || Object.keys(extractedFromAI).length > 0) {
-          let newParams = { ...tradingParams };
-          if (extractedFromAI.sell_coin) {
-            const normSell = normalizeCurrency(extractedFromAI.sell_coin);
-            if (normSell) newParams.sell_coin = normSell;
+        // NEW: Also run hidden AI extraction on user input
+        const lastUserMessage = messages[messages.length - 1]?.content;
+        if (lastUserMessage) {
+          const hiddenExtracted = await extractParamsWithHiddenAI(lastUserMessage);
+          console.log("Hidden AI extracted params:", hiddenExtracted);
+          
+          // Merge both extractions, prioritizing hidden AI results
+          const mergedExtracted = { ...extractedFromAI, ...hiddenExtracted };
+          console.log("Merged extracted params:", mergedExtracted);
+          
+          // Only update params if we have any trading context or if AI found parameters
+          if (needsTradingParams || Object.keys(mergedExtracted).length > 0) {
+            let newParams = { ...tradingParams };
+            if (mergedExtracted.sell_coin) {
+              const normSell = normalizeCurrency(mergedExtracted.sell_coin);
+              if (normSell) newParams.sell_coin = normSell;
+            }
+            if (mergedExtracted.buy_coin) {
+              const normBuy = normalizeCurrency(mergedExtracted.buy_coin);
+              if (normBuy) newParams.buy_coin = normBuy;
+            }
+            if (mergedExtracted.no_of_sell_coins) {
+              newParams.no_of_sell_coins = mergedExtracted.no_of_sell_coins;
+            }
+            if (mergedExtracted.threshold) {
+              newParams.threshold = mergedExtracted.threshold;
+            }
+            setTradingParams(newParams);
+            console.log("Updated trading params from merged AI extraction:", newParams);
           }
-          if (extractedFromAI.buy_coin) {
-            const normBuy = normalizeCurrency(extractedFromAI.buy_coin);
-            if (normBuy) newParams.buy_coin = normBuy;
-          }
-          if (extractedFromAI.no_of_sell_coins) {
-            newParams.no_of_sell_coins = extractedFromAI.no_of_sell_coins;
-          }
-          if (extractedFromAI.threshold) {
-            newParams.threshold = extractedFromAI.threshold;
-          }
-          setTradingParams(newParams);
-          console.log("Updated trading params from AI response (with mapping):", newParams);
         }
       }
 
