@@ -399,24 +399,24 @@ Example for "protect my COMP holdings, sell for USDT at 34% loss":
     
     console.log("Found bracketed values in AI response:", bracketMatches);
     
-    // Process bracketed values
+    // Process bracketed values - BUT don't override if we already have context-aware extraction
     for (const value of bracketMatches) {
       // Check if it's a percentage
       if (value.includes('%') || /^\d+(?:\.\d+)?$/.test(value)) {
         const numericValue = value.replace('%', '');
-        if (!isNaN(parseFloat(numericValue))) {
+        if (!isNaN(parseFloat(numericValue)) && !extracted.threshold) {
           extracted.threshold = numericValue;
           console.log("Extracted threshold from brackets:", numericValue);
         }
       } else {
-        // Check if it's a currency
+        // Check if it's a currency - but be more careful about assignment
         const currency = normalizeCurrency(value);
         if (currency) {
-          // Determine if it's sell or buy currency based on context
-          if (!extracted.sell_coin) {
+          // Only assign if we don't already have extracted values (context-aware takes priority)
+          if (!extracted.sell_coin && !extracted.buy_coin) {
             extracted.sell_coin = currency;
             console.log("Extracted sell_coin from brackets:", currency);
-          } else if (!extracted.buy_coin) {
+          } else if (!extracted.buy_coin && extracted.sell_coin && extracted.sell_coin !== currency) {
             extracted.buy_coin = currency;
             console.log("Extracted buy_coin from brackets:", currency);
           }
@@ -1168,9 +1168,16 @@ Example output: {"sell_coin": "LUNA", "buy_coin": "USDT", "no_of_sell_coins": nu
 
   // Enhanced extraction function that uses AI as fallback
   const extractTradingParamsEnhanced = async (input: string, lastQuestion?: string): Promise<Partial<TradingParams>> => {
-    // First try regex-based extraction
+    // First try regex-based extraction (this includes context-aware extraction)
     const regexExtracted = extractTradingParams(input, lastQuestion);
     console.log("Regex extracted:", regexExtracted);
+
+    // IMPORTANT: If context-aware extraction found something (answering a specific question), 
+    // prioritize it and don't override with AI
+    if (lastQuestion && Object.keys(regexExtracted).length > 0) {
+      console.log("Context-aware extraction successful - returning regex result");
+      return regexExtracted;
+    }
 
     // Check if we have all parameters
     const missingParams = [];
